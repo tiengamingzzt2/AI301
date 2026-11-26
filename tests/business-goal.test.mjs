@@ -73,3 +73,55 @@ test('a numeric-only file renders a value distribution instead of a missing-grou
   assert.match(html,/Xem chỉ số số học/);
   assert.doesNotMatch(html,/Chưa tìm thấy cặp cột nhóm|Độ đầy đủ của cột/);
 });
+
+test('visual cards choose share and chronological trend without changing values or drawing false zero bars',()=>{
+  const file={name:'sample.csv',headers:['Chu kỳ','Bắt đầu','Doanh thu'],rows:[
+    {'Chu kỳ':'Năm','Bắt đầu':'2026-03-01','Doanh thu':'100'},
+    {'Chu kỳ':'Tháng','Bắt đầu':'2026-01-01','Doanh thu':'200'},
+    {'Chu kỳ':'Năm','Bắt đầu':'2026-02-01','Doanh thu':'300'}
+  ]};
+  file.rows=[...file.rows,...file.rows.map(row=>({...row}))];
+  const model={files:[{...file,numericColumns:context.businessNumericSummaries(file)}],aggregates:context.businessAggregates([file]),context:{goal:''}};
+  const html=context.insightChartCards(model);
+  assert.match(html,/TỶ TRỌNG/);assert.match(html,/XU HƯỚNG/);assert.match(html,/PHÂN BỐ/);
+  assert.match(html,/2026-01-01: 400/);assert.match(html,/2026-03-01: 200/);
+  const line=html.slice(html.indexOf('XU HƯỚNG'));
+  assert.ok(line.indexOf('2026-01-01: 400')<line.indexOf('2026-03-01: 200'));
+  assert.match(context.insightPlot([{name:'Empty',value:0},{name:'Actual',value:5}],'column'),/height="0"/);
+  assert.doesNotMatch(html,/sample\.csv/);
+});
+
+test('profit per square metre uses paired sums and excludes invalid area without inventing values',()=>{
+  const file={name:'stores.csv',headers:['Cửa hàng','Lợi nhuận (VND)','Diện tích (m2)'],rows:[
+    {'Cửa hàng':'A','Lợi nhuận (VND)':'100','Diện tích (m2)':'10'},
+    {'Cửa hàng':'A','Lợi nhuận (VND)':'300','Diện tích (m2)':'90'},
+    {'Cửa hàng':'A','Lợi nhuận (VND)':'1000','Diện tích (m2)':'0'},
+    {'Cửa hàng':'B','Lợi nhuận (VND)':'','Diện tích (m2)':'10'},
+    {'Cửa hàng':'B','Lợi nhuận (VND)':'-40','Diện tích (m2)':'20'}
+  ]};
+  const [request]=context.businessRequestedResults([file],'Tính lợi nhuận trên từng m² theo cửa hàng');
+  assert.equal(request.status,'calculated');
+  const result=request.calculations[0];
+  assert.equal(result.topGroups.find(g=>g.name==='A').value,4);
+  assert.equal(result.topGroups.find(g=>g.name==='B').value,-2);
+  assert.equal(result.validRows,3);assert.equal(result.skippedRows,2);assert.equal(result.totalValue,3);
+  assert.match(result.formula,/Diện tích/);
+  const missing={...file,headers:['Cửa hàng','Lợi nhuận (VND)']};
+  assert.equal(context.businessRequestedResults([missing],'Lợi nhuận/m2 theo cửa hàng')[0].status,'limited');
+});
+
+test('business math supports differences, products, weighted margins, counts, min and max',()=>{
+  const file={name:'data.csv',headers:['Vùng','Doanh thu','Tổng chi phí','Giá','Số lượng'],rows:[
+    {'Vùng':'Bắc','Doanh thu':'100','Tổng chi phí':'60','Giá':'20','Số lượng':'5'},
+    {'Vùng':'Bắc','Doanh thu':'300','Tổng chi phí':'240','Giá':'30','Số lượng':'10'},
+    {'Vùng':'Nam','Doanh thu':'200','Tổng chi phí':'100','Giá':'40','Số lượng':'5'}
+  ]};
+  const calc=q=>context.businessRequestedResults([file],q)[0].calculations[0];
+  assert.equal(calc('Biên lợi nhuận theo vùng').topGroups.find(g=>g.name==='Bắc').value,25);
+  assert.equal(calc('Doanh thu - Tổng chi phí theo vùng').totalValue,200);
+  assert.equal(calc('Giá * Số lượng theo vùng').totalValue,600);
+  assert.equal(calc('Đếm dòng theo vùng').totalValue,3);
+  assert.equal(calc('Doanh thu nhỏ nhất theo vùng').totalValue,100);
+  assert.equal(calc('Doanh thu lớn nhất theo vùng').totalValue,300);
+  assert.equal(calc('Trung bình Doanh thu').totalValue,200);
+});

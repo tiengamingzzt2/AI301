@@ -119,7 +119,7 @@ function cleanCorruptedText(val) {
   return s;
 }
 
-function csvRows(text) {
+function csvRows(text,preview=false) {
   const header = text.split(/\r?\n/, 1)[0] || '';
   const counts = { ',': 0, ';': 0, '\t': 0 }; let inQuotes = false;
   for (let i = 0; i < header.length; i++) {
@@ -136,8 +136,9 @@ function csvRows(text) {
     else if (c === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = ''; }
     else cell += c;
   }
-  if(quoted)throw new Error('CSV có ô văn bản chưa đóng dấu nháy kép.');
+  if(quoted && preview!==true)throw new Error('CSV có ô văn bản chưa đóng dấu nháy kép.');
   if (cell.length || row.length) { row.push(cell.replace(/\r$/, '')); rows.push(row); }
+  if(preview)return preview==='edit'?rows:rows.slice(0,21).map(row=>row.slice(0,12));
   const headers = (rows.shift() || []).map(x => cleanCorruptedText(x.trim().replace(/^\uFEFF/, '')));
   validateHeaders(headers);
   rows.forEach((r,i)=>{if(r.length>headers.length)throw new Error(`CSV dòng ${i+2} có nhiều ô hơn số cột. Kiểm tra dấu phân cách và dấu nháy kép.`);});
@@ -163,7 +164,7 @@ function zipEntries(buf) {
 }
 
 function xmlText(s) { return (s || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'"); }
-function parseXlsx(buf) {
+function parseXlsx(buf,preview=false) {
   const files = zipEntries(buf);
   const plainXml=xml=>xml.replace(/(<\/?)[A-Za-z_][\w.-]*:/g,'$1');
   const shared = [];
@@ -184,15 +185,16 @@ function parseXlsx(buf) {
     }
     matrix.push(cells.map(v => v ?? ''));
   }
+  if(preview)return preview==='edit'?matrix:matrix.slice(0,21).map(row=>Array.from(row.slice(0,12),value=>value??''));
   const headers = (matrix.shift() || []).map(v => cleanCorruptedText(String(v).trim()));
   validateHeaders(Array.from(headers,v=>v || ''));
   return matrix.filter(r => r.some(v => String(v).trim())).map(r => Object.fromEntries(headers.map((h, i) => [h, cleanCorruptedText(String(r[i] ?? '').trim())])));
 }
-function parseFile(file) {
+function parseFile(file,preview=false) {
   const bytes = Buffer.from(file.data || '', 'base64');
   const ext = path.extname(file.name || '').toLowerCase();
-  if (ext === '.xlsx') return parseXlsx(bytes);
-  if (ext === '.csv' || !ext) return csvRows(bytes.toString('utf8'));
+  if (ext === '.xlsx') return parseXlsx(bytes,preview);
+  if (ext === '.csv' || !ext) return csvRows(bytes.toString('utf8'),preview);
   throw new Error(`Định dạng .${ext.slice(1)} chưa được hỗ trợ. Hãy dùng CSV hoặc XLSX.`);
 }
 
@@ -329,10 +331,12 @@ function prepareRepair(body) {
   if(validation.blocked && validation.remediation?.action==='reload')throw new Error(validation.remediation.reason);
   const files = []; const report = { renamed: 0, dates: 0, exactDuplicates: 0 };
   for (const source of readInputs(body)) {
+      if(body.analysisMode==='generic')source.kind='generic';
       const { kind, name } = source;
       let rows = source.rows;
       let headers = [...new Set(rows.flatMap(row => Object.keys(row)))];
       let mapping = Object.fromEntries(Object.entries(aliases).map(([field, names]) => [field, headers.find(h => names.some(n => key(n) === key(h))) ?? '']));
+      if(body.analysisMode==='generic' && body.mode!=='auto')mapping={};
       if (body.mode === 'auto') {
         const used = new Set(Object.values(mapping).filter(Boolean));
         const pairs = Object.entries(mapping).filter(([, h]) => h);
@@ -415,10 +419,19 @@ function assessAnalyticalValue(files){
     const varying=meaningful.some(header=>new Set(rows.map(row=>String(row[header]??'').trim()).filter(value=>!missing(value))).size>1);
     const filled=rows.reduce((n,row)=>n+meaningful.filter(header=>!missing(row[header])).length,0);
     const coverage=meaningful.length&&file.rows.length?filled/(meaningful.length*file.rows.length):0;
+    const genericLabel=header=>/^(gia tri|value|values|data|du lieu|number|so|cot|column|field)( \d+)?$/.test(key(header));
+    const sequentialOnly=rows.length>=5 && meaningful.length>0 && meaningful.every(header=>{
+      if(!genericLabel(header))return false;
+      const values=rows.map(row=>String(row[header]??'').trim());
+      if(values.some(value=>!/^[-+]?\d+(\.\d+)?$/.test(value)))return false;
+      const numbers=values.map(Number),step=numbers[1]-numbers[0];
+      return step!==0 && numbers.every((value,index)=>Math.abs(value-(numbers[0]+step*index))<=Math.max(1,Math.abs(value))*1e-10);
+    });
     let reason='';
     if(!rows.length)reason='Chỉ có khóa định danh hoặc các ô trống, chưa có nội dung để phân tích.';
     else if(file.rows.length>=3 && signatures.size===1 && !varying)reason='Các dòng có nội dung giống hệt nhau; chưa có sự khác biệt để so sánh hoặc tổng hợp đáng tin cậy.';
     else if(coverage<.1 && rows.length<2)reason='Trên 90% nội dung phân tích đang trống và chưa có đủ dòng có giá trị.';
+    else if(sequentialOnly)reason='Bảng chỉ có mã định danh và các cột tên chung chứa dãy số tuần tự. Chưa rõ đây là chỉ số gì để phân tích. Hãy đặt tên cột thể hiện ý nghĩa và đơn vị thực tế, hoặc bổ sung dữ liệu nghiệp vụ như doanh thu, số lượng, khu vực hay thời điểm đo.';
     if(reason){excluded.push({file,reason});continue;}
     usable.push(file);
     if(file.duplicates)warnings.push({field:'Dòng trùng',message:`Có ${file.duplicates} dòng trùng hoàn toàn; giữ nguyên để người dùng kiểm tra, chưa tự loại vì có thể là giao dịch thực.`});
@@ -427,7 +440,39 @@ function assessAnalyticalValue(files){
   }
   return {usable,excluded,warnings};
 }
-function analyze(body) {
+function inputPreviews(body){
+  const files=body.files || Object.values(body.datasets||{}).flat();
+  return files.slice(0,6).map((file,index)=>{
+    try{return {index:index+1,matrix:parseFile(file,true).map(row=>row.map(value=>String(value??'').slice(0,500)))};}
+    catch{return {index:index+1,matrix:[],unreadable:true};}
+  });
+}
+function correctInputCells(body){
+  const files=body.files;
+  if(!Array.isArray(files)||!Array.isArray(body.patches)||body.patches.length>1600)throw new Error('Nội dung chỉnh sửa không hợp lệ.');
+  const matrices=new Map();
+  for(const patch of body.patches){
+    const {file,row,column,value}=patch;
+    if(!Number.isInteger(file)||file<0||file>=files.length||!Number.isInteger(row)||row<0||row>20||!Number.isInteger(column)||column<0||column>=12||typeof value!=='string'||value.length>500)throw new Error('Ô chỉnh sửa không hợp lệ.');
+    if(!matrices.has(file))matrices.set(file,parseFile(files[file],'edit'));
+    const matrix=matrices.get(file);
+    if(row>=matrix.length)throw new Error('Dòng chỉnh sửa không tồn tại.');
+    matrix[row][column]=value;
+  }
+  return {files:files.map((file,index)=>{
+    if(!matrices.has(index))return file;
+    const matrix=matrices.get(index),quote=value=>`"${String(value??'').replaceAll('"','""')}"`;
+    const width=matrix.reduce((width,row)=>Math.max(width,row.length),0);
+    const csv=matrix.map(row=>Array.from({length:width},(_,column)=>quote(row[column])).join(',')).join('\r\n');
+    return {name:file.name.replace(/\.[^.]+$/,'')+'_da_sua.csv',data:Buffer.from('\uFEFF'+csv).toString('base64')};
+  })};
+}
+function analyze(body){
+  const result=analyzeData(body);
+  if(result.blocked)result.previewFiles=inputPreviews(body);
+  return result;
+}
+function analyzeData(body) {
   const log = []; const datasets = {};const tracker=warningTracker();
   const sources = readInputs(body);
   const detectedFiles = sources.map(s => ({ name: s.name, kind: s.kind, rows: s.rows.length }));
@@ -590,9 +635,14 @@ async function handleRequest(req, res) {
     try { return send(req, res, 200, prepareRepair(await readBody(req))); }
     catch (e) { return send(req, res, 400, { message: e.message }); }
   }
+  if(req.method==='POST' && pathname==='/api/correct-input'){
+    try{return send(req,res,200,correctInputCells(await readBody(req)));}
+    catch(error){return send(req,res,400,{message:error.message});}
+  }
   if (req.method === 'POST' && (pathname === '/api/run' || pathname.endsWith('/api/run'))) {
-    try { const body = await readBody(req); return send(req, res, 200, analyze(body)); }
-    catch (e) { return send(req, res, 400, { blocked: true, errorCount:1, errors: [{ file: 'Tệp tải lên', row: '-', field: 'Định dạng', message: e.message }],remediation:{action:'reload',reason:'Không đọc được cấu trúc file. Hãy kiểm tra định dạng, hàng tiêu đề và nội dung file gốc rồi tải lại.',issues:[]}, log: [] }); }
+    let body;
+    try { body = await readBody(req); return send(req, res, 200, analyze(body)); }
+    catch (e) { return send(req, res, 400, { blocked: true,previewFiles:body?inputPreviews(body):[], errorCount:1, errors: [{ file: 'Tệp tải lên', row: '-', field: 'Định dạng', message: e.message }],remediation:{action:'reload',reason:'Không đọc được cấu trúc file. Hãy kiểm tra định dạng, hàng tiêu đề và nội dung file gốc rồi tải lại.',issues:[]}, log: [] }); }
   }
   const requested = pathname === '/' ? '/index.html' : pathname;
   const file = path.join(ROOT, 'public', requested.replace(/^\/+/, ''));

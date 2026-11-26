@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const backend = { require: name => name === 'node:http' ? { createServer: () => ({ listen() {} }) } : require(name), __dirname: root, process, Buffer, console };
 vm.createContext(backend);
-vm.runInContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8') + '\nglobalThis.api={prepareRepair,analyze,dateVal,csvRows,parseFile};', backend);
+vm.runInContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8') + '\nglobalThis.api={prepareRepair,analyze,dateVal,csvRows,parseFile,inputPreviews,correctInputCells};', backend);
 const { prepareRepair, analyze, dateVal, csvRows, parseFile } = backend.api;
 const upload = (text, name = 'input.csv') => ({ name, data: Buffer.from(text).toString('base64') });
 
@@ -269,6 +269,105 @@ test('input quality gate blocks unusable content but allows useful incomplete da
   assert.equal(duplicates.blocked,false);assert.equal(duplicates.notification.level,'warning');assert.equal(duplicates.cleanedFiles[0].rows.length,3);
   const mixed=analyze({stage:'clean',analysisMode:'generic',files:[upload('customer_id,Revenue\nKH1,','empty.csv'),upload('Region,Revenue\nNorth,100\nSouth,200','valid.csv')]});
   assert.equal(mixed.blocked,false);assert.equal(mixed.cleanedFiles.length,1);assert.equal(mixed.cleanedFiles[0].name,'valid.csv');
+});
+
+test('blocked upload previews original cells, caps large tables and hides analysis requests at step one',async()=>{
+  const malformed=upload(',Revenue\n<script>alert(1)</script>,100\n,','broken.csv');
+  assert.throws(()=>analyze({stage:'clean',files:[malformed]}));
+  const preview=backend.api.inputPreviews({files:[malformed]});
+  assert.equal(preview[0].matrix[0][0],'');
+  assert.equal(preview[0].matrix[1][1],'100');
+  const large=backend.api.inputPreviews({files:[upload('Region,Revenue\n'+Array.from({length:200},()=> 'North,100').join('\n'))]});
+  assert.equal(large[0].matrix.length,21);
+  const {ctx,element}=frontend();
+  ctx.appState.datasets={auto:[upload('Region,Revenue\nNorth,100\nNorth,100\nNorth,100')]};
+  await ctx.runClean();
+  assert.equal(ctx.appState.step,1);
+  assert.ok(element('#stage').innerHTML.includes('Dữ liệu chưa đạt kiểm tra'));
+  assert.ok(!element('#stage').innerHTML.includes('Phân tích theo yêu cầu của bạn'));
+  ctx.appState.clean.previewFiles=preview;
+  ctx.renderUpload();
+  assert.ok(element('#stage').innerHTML.includes('&lt;script&gt;'));
+  assert.ok(!element('#stage').innerHTML.includes('<script>alert'));
+});
+
+test('blocked grid repairs headers without dropping unseen rows or columns',()=>{
+  const headers=['',...Array.from({length:13},(_,i)=>'Field'+i)];
+  const rows=Array.from({length:80},(_,i)=>['Region'+i,...Array.from({length:13},(_,j)=>String(i+j))]);
+  const original=upload([headers.join(','),...rows.map(row=>row.join(','))].join('\n'));
+  const result=backend.api.correctInputCells({files:[original],patches:[{file:0,row:0,column:0,value:'Region'},{file:0,row:1,column:1,value:'999'}]});
+  const parsed=parseFile(result.files[0]);
+  assert.equal(parsed.length,80);
+  assert.equal(parsed[0].Region,'Region0');
+  assert.equal(parsed[0].Field0,'999');
+  assert.equal(parsed[79].Field12,'91');
+  assert.throws(()=>backend.api.correctInputCells({files:[original],patches:[{file:0,row:100,column:0,value:'bad'}]}));
+});
+
+test('accepted flexible data opens a repair modal without a renewal validation error',async()=>{
+  const file=upload('contract_id,Region,Revenue\nHD1,North,100\nHD2,South,200');
+  const {ctx,element}=frontend();ctx.appState.datasets={auto:[file]};
+  await ctx.runClean();assert.equal(ctx.appState.step,2);assert.equal(ctx.appState.clean.blocked,false);
+  await ctx.openRepair('manual');
+  assert.equal(element('#repairDialog').open,true);
+  assert.ok(element('#repairContent').innerHTML.includes('repairSearch'));
+  ctx.repairFile().rows[0].Revenue='150';
+  assert.equal(ctx.appState.clean.cleanedFiles[0].rows[0].Revenue,'100');
+  await ctx.applyRepair();
+  assert.equal(ctx.appState.clean.blocked,false);
+  assert.equal(ctx.appState.clean.cleanedFiles[0].rows[0].Revenue,'150');
+  assert.equal(ctx.appState.clean.cleanedFiles[0].rows[1].Revenue,'200');
+  const draft=prepareRepair({mode:'auto',analysisMode:'generic',datasets:{auto:[file]}});
+  assert.equal(draft.files[0].kind,'generic');
+});
+
+test('repair search keeps original row indices and all hidden rows when applying edits',async()=>{
+  const {ctx,element}=frontend();
+  ctx.appState.datasets={auto:[upload('Code,Khu vực,Revenue\n'+Array.from({length:65},(_,i)=>`KH${i},${i%2?'Miền Nam':'Miền Bắc'},${100+i}`).join('\n'))]};
+  await ctx.runClean();await ctx.openRepair('manual');
+  const r=ctx.appState.repair;
+  r.query='mien bac';r.searchField='Khu vực';
+  assert.equal(ctx.repairFilteredRows(ctx.repairFile()).length,33);
+  r.page=1;
+  const markup=ctx.repairTable(ctx.repairFile());
+  assert.ok(markup.includes('data-cell-row="40"'));
+  element('#repairContent').handlers.input({target:{id:'',matches:()=>true,dataset:{cellRow:'40',cellCol:'2'},value:'999',classList:{remove(){}},removeAttribute(){}}});
+  r.query='not found';assert.ok(ctx.repairTable(ctx.repairFile()).includes('Không tìm thấy'));
+  await ctx.applyRepair();
+  const rows=ctx.appState.clean.cleanedFiles[0].rows;
+  assert.equal(rows.length,65);assert.equal(rows[40].Revenue,'999');assert.equal(rows[41].Revenue,'141');
+});
+
+test('generic field selection excludes columns from AI, calculations and reports without changing source data',async()=>{
+  const {ctx,element}=frontend();
+  ctx.appState.datasets={auto:[upload('Region,Revenue,Quantity\nNorth,100,3\nSouth,200,5\nNorth,300,7')]};
+  await ctx.runClean();assert.equal(ctx.cleanSelectionReady(),true);
+  element('#stage').handlers.change({target:{dataset:{cleanField:'Revenue'},checked:false,matches:()=>false}});
+  assert.ok(ctx.appState.excludedFields.includes('Revenue'));
+  assert.equal(ctx.appState.clean.cleanedFiles[0].rows[0].Revenue,'100');
+  assert.equal(element('[data-analysis-fields]').open,true);
+  const input=ctx.aiBusinessInput();
+  assert.ok(!JSON.stringify(input.files).includes('Revenue'));
+  assert.ok(input.aggregates.every(item=>item.metricField!=='Revenue'));
+  ctx.aiFailure=true;await ctx.runBusinessAnalysisFromContext();
+  assert.ok(ctx.appState.excludedFields.includes('Revenue'));
+  assert.ok(!JSON.stringify(ctx.aiRequests.at(-1).input.files).includes('Revenue'));
+  const model=ctx.genericReportModel();
+  assert.ok(!model.files[0].headers.includes('Revenue'));
+  assert.ok(!ctx.genericReportDocument(model).includes('Revenue'));
+  assert.equal(model.files[0].rows.length,3);
+});
+
+test('identifier plus generic sequential values is blocked, but meaningful metrics and context remain usable',()=>{
+  const run=(headers,rows)=>analyze({stage:'clean',analysisMode:'generic',files:[upload(headers+'\n'+rows.join('\n'))]});
+  const generated=Array.from({length:20001},(_,index)=>`ERR-${String(index+1).padStart(5,'0')},${index}`);
+  const result=run('Mã dòng,Giá trị',generated);
+  assert.equal(result.blocked,true);
+  assert.match(result.notification.message,/dãy số tuần tự/);
+  assert.equal(result.previewFiles[0].matrix.length,21);
+  assert.equal(run('Mã dòng,Doanh thu (VND)',generated).blocked,false);
+  assert.equal(run('Mã dòng,Giá trị,Khu vực',generated.slice(0,10).map((row,i)=>row+','+(i%2?'Nam':'Bắc'))).blocked,false);
+  assert.equal(run('Mã dòng,Giá trị',['A,5','B,9','C,2','D,7','E,3']).blocked,false);
 });
 
 test('a combined contract file retains usage, support and prices in deeper analysis', () => {
