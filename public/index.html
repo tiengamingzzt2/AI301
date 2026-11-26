@@ -13,7 +13,9 @@
   <link rel="stylesheet" href="/palette.css">
   <link rel="stylesheet" href="/ai.css?v=local-report-2">
   <link rel="stylesheet" href="/glass.css?v=input-notice-1">
+  <link rel="stylesheet" href="/classic-brand.css?v=intro-120-1">
   <link rel="stylesheet" href="/mecha.css?v=mecha-4">
+  <link rel="stylesheet" href="/usability.css?v=business-math-1">
 </head>
 <body>
 
@@ -184,12 +186,12 @@
         <button id="closeSidebar" class="sidebar-close" aria-label="Đóng menu">✕</button>
       </div>
 
-      <div class="sidebar-section-title">QUY TRÌNH GIA HẠN</div>
+      <div class="sidebar-section-title">QUY TRÌNH LÀM VIỆC</div>
       <nav class="steps" id="steps" aria-label="Chuyển bước quy trình">
         <button type="button" class="step active" data-step="1" aria-current="step"><span class="step-num">01</span><span><b>Nạp dữ liệu</b><small>Tải & nhận diện tệp</small><span class="step-count" id="stepCount1">—</span></span></button>
-        <button type="button" class="step hitl-step" data-step="2" disabled><span class="step-num">02</span><span><b>Duyệt dữ liệu <small class="hitl-pill" title="Chốt chặn con người kiểm tra dữ liệu">HITL</small></b><small>Kiểm tra bản làm sạch</small><span class="step-count" id="stepCount2">—</span></span></button>
-        <button type="button" class="step" data-step="3" disabled><span class="step-num">03</span><span><b>Phân tích</b><small>Đề xuất & chọn hồ sơ</small><span class="step-count" id="stepCount3">—</span></span></button>
-        <button type="button" class="step hitl-step" data-step="4" disabled><span class="step-num">04</span><span><b>Duyệt kết quả <small class="hitl-pill" title="Chốt chặn con người phê duyệt">HITL</small></b><small>Phê duyệt & xuất file</small><span class="step-count" id="stepCount4">—</span></span></button>
+        <button type="button" class="step hitl-step" data-step="2" disabled><span class="step-num">02</span><span><b>Duyệt dữ liệu <small class="hitl-pill" title="Chốt chặn con người kiểm tra dữ liệu">Bạn duyệt</small></b><small>Kiểm tra bản làm sạch</small><span class="step-count" id="stepCount2">—</span></span></button>
+        <button type="button" class="step" data-step="3" disabled><span class="step-num">03</span><span><b>Phân tích</b><small>Kết quả & báo cáo</small><span class="step-count" id="stepCount3">—</span></span></button>
+        <button type="button" class="step hitl-step" data-step="4" disabled><span class="step-num">04</span><span><b>Duyệt kết quả <small class="hitl-pill" title="Chốt chặn con người phê duyệt">Bạn duyệt</small></b><small>Phê duyệt & xuất file</small><span class="step-count" id="stepCount4">—</span></span></button>
       </nav>
 
       <section id="sidebarFilters" class="sidebar-filter-section" hidden aria-label="Lọc nhóm đề xuất"></section>
@@ -197,14 +199,9 @@
       <div class="sidebar-section-title">CÔNG CỤ</div>
       <nav class="main-nav" aria-label="Tiện ích làm việc">
         <a class="nav-item active" href="#workflow"><span>▦</span> Không gian làm việc</a>
-        <button class="sidebar-link report-menu-toggle" id="sidebarReport" aria-controls="reportSubmenu" aria-expanded="false" disabled><span>▤</span> Báo cáo phân tích <span class="report-chevron" aria-hidden="true">⌄</span></button>
-        <div class="report-submenu" id="reportSubmenu" aria-hidden="true" inert>
-          <button class="sidebar-link" id="sidebarCharts"><span>◷</span> Dashboard / Biểu đồ</button>
-          <button class="sidebar-link" id="sidebarTools"><span>⚙</span> Phản hồi / tham số</button>
-        </div>
         <button class="sidebar-link" id="sidebarOverview" aria-controls="overviewPanel" aria-expanded="true"><span>◫</span> Ẩn thống kê</button>
         <a class="nav-item" href="#audit"><span>◷</span> Nhật ký Agent</a>
-        <button type="button" class="sidebar-link theme-toggle" id="themeToggle" role="switch" aria-label="Chế độ tối" aria-checked="false"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-copy">Dark mode<small id="themeStatus" aria-hidden="true">Đang tắt</small></span><span class="theme-switch" aria-hidden="true"><i></i></span></button>
+        <button type="button" class="sidebar-link theme-toggle" id="themeToggle" role="switch" aria-label="Chế độ tối" aria-checked="false"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-copy">Chế độ tối<small id="themeStatus" aria-hidden="true">Đang tắt</small></span><span class="theme-switch" aria-hidden="true"><i></i></span></button>
       </nav>
 
       <button type="button" class="design-launch" data-open-design><span aria-hidden="true">◈</span><span><b>Chọn giao diện</b><small id="designLabel">Glass / Giao diện 01</small></span><span style="margin-left:auto" aria-hidden="true">↗</span></button>
@@ -235,7 +232,7 @@
       </header>
 
       <section class="mecha-companion" aria-label="Robot MECHA đồng hành"><div class="companion-copy"><span class="companion-dot"></span><div><b>MECHA-01 <small>ONLINE</small></b><span id="companionStatus" role="status">Sẵn sàng đồng hành</span></div></div><div class="robot-runway"><div class="robot-patrol"><button type="button" class="robot-character" id="robotCharacter" aria-label="Cho robot nhảy chào"><svg viewBox="0 0 90 86" fill="none" aria-hidden="true"><ellipse cx="45" cy="80" rx="25" ry="3" fill="#4cdbf4" opacity=".16"/><g class="robot-left-leg"><path d="M33 54v14l-8 6v4h17V55" fill="#1d4459" stroke="#69d4e9" stroke-width="2"/></g><g class="robot-right-leg"><path d="M49 54v14l-1 10h18v-4l-7-6V54" fill="#1d4459" stroke="#69d4e9" stroke-width="2"/></g><g class="robot-torso"><path d="M28 34h33l5 22-21 7-22-7Z" fill="#183248" stroke="#ffd16a" stroke-width="2"/><path d="m33 40 12 10 12-10" stroke="#ffd16a" stroke-width="4"/><circle cx="45" cy="52" r="5" fill="#65eaff"/><g class="robot-left-arm"><path d="m25 36-10 7 2 16 9 2 3-10" fill="#bd8d35" stroke="#ffe2a1" stroke-width="2"/></g><g class="robot-right-arm"><path d="m64 36 10 7-2 16-9 2-3-10" fill="#bd8d35" stroke="#ffe2a1" stroke-width="2"/></g><path d="m28 8 12 5h12L63 8v21L53 37H37l-9-8Z" fill="#23485e" stroke="#ffd16a" stroke-width="2"/><path d="m33 20 9 3-3 5-6-3Zm25 0-9 3 3 5 6-3Z" fill="#7df4ff"/><path d="m45 23-3 8h6" stroke="#ffd16a" stroke-width="2"/><path d="M23 12v17M68 12v17" stroke="#5ae1f6" stroke-width="3"/></g></svg></button></div></div><button type="button" id="pauseRobot" class="robot-pause" aria-pressed="false" aria-label="Tạm dừng robot">Ⅱ</button></section>
-      <details class="overview-panel" id="overviewPanel" open>
+      <details class="overview-panel" id="overviewPanel">
         <summary>Thống kê phiên làm việc <span>Thu gọn / mở rộng</span></summary>
         <section class="overview-grid" aria-label="Thống kê theo bước đang xem">
           <article class="overview-card"><div class="card-top"><h2 id="overviewTotalLabel">Hồ sơ trong phiên</h2></div><div class="stat-content"><div><strong id="overviewTotal">—</strong><p id="overviewTotalNote">Bắt đầu bằng cách nạp dữ liệu</p></div></div></article>
@@ -245,8 +242,8 @@
       </details>
 
       <section class="workspace-heading">
-        <h2 id="workspaceTitle">Quy trình gia hạn</h2>
-        <span class="workspace-status"><i></i><span id="workspaceStatus">Sẵn sàng nhận dữ liệu</span></span>
+        <h2 id="workspaceTitle">Quy trình làm việc</h2>
+        <div class="workspace-view-controls"><span class="workspace-status"><i></i><span id="workspaceStatus">Sẵn sàng nhận dữ liệu</span></span><button type="button" id="expandWorkspace" class="btn btn-light" aria-pressed="false" aria-controls="workflow">⛶ Mở rộng vùng làm việc</button></div>
       </section>
 
       <section class="workflow-card" aria-label="Nội dung công việc">
@@ -376,19 +373,19 @@
     </div>
   </dialog>
   <dialog id="inputGuideDialog" class="repair-dialog input-guide-dialog" aria-labelledby="inputGuideTitle"><div class="repair-dialog-header"><div><div class="eyebrow">KIỂM TRA ĐẦU VÀO</div><h2 id="inputGuideTitle">File mẫu & quy tắc dữ liệu</h2></div><button type="button" id="closeInputGuide" class="btn btn-light" aria-label="Đóng hướng dẫn đầu vào">✕</button></div><div id="inputGuideContent"></div><div class="input-guide-footer"><a class="btn btn-primary" href="/templates/mau_du_lieu_gia_han.xlsx" download>↓ Tải file mẫu XLSX</a></div></dialog>
-  <dialog id="designDialog" class="design-dialog" aria-labelledby="designTitle"><header><div><span class="eyebrow">AN TÍN / INTERFACE LAB</span><h2 id="designTitle">Hai giao diện. Một không gian.</h2><p>Chọn phong cách làm việc của bạn. Dữ liệu và tiến trình được giữ nguyên khi chuyển.</p></div><button type="button" id="closeDesign" aria-label="Đóng chọn giao diện">✕</button></header><div class="design-options"><button type="button" class="design-choice" data-design-choice="classic" aria-pressed="true"><div class="design-preview preview-classic" aria-hidden="true"><i></i><div><b></b><b></b><b></b></div></div><strong>01 / Glass</strong><p>Giao diện hiện tại. Kính trong, xanh nhẹ và không gian thoáng.</p></button><button type="button" class="design-choice" data-design-choice="mecha" aria-pressed="false"><div class="design-preview preview-mecha" aria-hidden="true"><i></i><div><b></b><b></b><b></b></div></div><strong>02 / MECHA Command</strong><p>Trạm điều khiển cơ khí. Titan tối, năng lượng cyan và điểm nhấn vàng kim.</p></button></div><p style="font-size:12px">Lựa chọn được lưu trên trình duyệt này. Bạn có thể đổi lại bất cứ lúc nào.</p></dialog>
+  <dialog id="designDialog" class="design-dialog" aria-labelledby="designTitle"><header><div><span class="eyebrow">AN TÍN / INTERFACE LAB</span><h2 id="designTitle">Hai giao diện. Một không gian.</h2><p>Chọn phong cách làm việc của bạn. Dữ liệu và tiến trình được giữ nguyên khi chuyển.</p></div><button type="button" id="closeDesign" aria-label="Đóng chọn giao diện">✕</button></header><div class="design-options"><button type="button" class="design-choice" data-design-choice="classic" aria-pressed="true"><div class="design-preview preview-classic" aria-hidden="true"><i></i><div><b></b><b></b><b></b></div></div><strong>01 / Glass</strong><p>Kính trong, xanh navy #04345a và điểm nhấn đỏ #dc0011.</p></button><button type="button" class="design-choice" data-design-choice="mecha" aria-pressed="false"><div class="design-preview preview-mecha" aria-hidden="true"><i></i><div><b></b><b></b><b></b></div></div><strong>02 / MECHA Command</strong><p>Trạm điều khiển cơ khí. Titan tối, năng lượng cyan và điểm nhấn vàng kim.</p></button></div><p style="font-size:12px">Lựa chọn được lưu trên trình duyệt này. Bạn có thể đổi lại bất cứ lúc nào.</p></dialog>
   <script src="/input-schema.js"></script>
   <script src="/input-guide.js?v=local-flex-1"></script>
-  <script src="/app.js?v=input-notice-1"></script>
+  <script src="/app.js?v=hide-math-guide-1"></script>
   <script src="/review.js"></script>
   <script src="/email.js"></script>
-  <script src="/repair.js"></script>
+  <script src="/repair.js?v=repair-search-1"></script>
   <script src="/charts.js"></script>
   <script src="/report.js"></script>
   <script src="/report-excel.js"></script>
-  <script src="/report-generic.js?v=input-notice-1"></script>
-  <script src="/ai.js?v=input-notice-1"></script>
-  <script src="/workspace.js?v=remove-approved-1"></script>
+  <script src="/report-generic.js?v=business-math-1"></script>
+  <script src="/ai.js?v=business-math-1"></script>
+  <script src="/workspace.js?v=repair-search-1"></script>
   <script src="/intro.js"></script>
 </body>
 </html>

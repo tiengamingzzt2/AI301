@@ -24,7 +24,7 @@ function aiCleanInput() {
   return {businessContext:state.businessContext,summary:clean.cleaningSummary,quality:clean.inputQuality,warnings:(clean.warnings || []).slice(0,8),sample,reviewerFeedback:state.drafts.clean || ''};
 }
 
-function businessColumnKey(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
+function businessColumnKey(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/đ/g,'d').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
 function businessAmount(value){
   let text=String(value??'').trim().replace(/\s|[₫$]/g,'').replace(/(?:vnd|vnđ|đồng|đ)$/i,'');
   if(!/^-?\d[\d.,]*$/.test(text))return null;
@@ -125,11 +125,11 @@ function businessAggregates(files,goal=''){
   }).flat().filter(Boolean);
 }
 function aiBusinessInput() {
-  const source=state.clean?.cleanedFiles || [];
+  const source=selectedAnalysisFiles();
   const goal=state.businessContext?.goal || '';
   const files=source.slice(0,6).map(file=>({name:file.name,kind:file.kind,totalRows:file.rows.length,columns:file.headers.slice(0,16).map(name=>({name,filled:file.rows.reduce((n,row)=>n+(row[name]!=null && String(row[name]).trim()!==''?1:0),0)})),numericColumns:businessNumericSummaries(file,goal).slice(0,6),textColumns:businessTextSummaries(file).slice(0,6),sample:file.rows.slice(0,2).map(row=>Object.fromEntries(file.headers.slice(0,12).map(name=>[name,String(row[name]??'').slice(0,80)])))}));
   const requestedResults=businessRequestedResults(source,goal);
-  return {businessContext:state.businessContext,requestedResults,files,aggregates:businessAggregates(source,goal).slice(0,12),quality:state.clean?.inputQuality,partialAnalysis:state.clean?.partialAnalysis};
+  return {businessContext:state.businessContext,requestedResults,files,aggregates:businessAggregates(source,goal).slice(0,12),quality:{status:state.clean?.inputQuality?.status},partialAnalysis:state.clean?.partialAnalysis};
 }
 
 function businessRequestedResults(files,goal){
@@ -137,12 +137,91 @@ function businessRequestedResults(files,goal){
   return String(goal).split(/[\n;]+/).map(s=>s.trim()).filter(Boolean).slice(0,5).map(question=>{
     const key=businessColumnKey(question),ascending=/(thap_nhat|it_nhat|nho_nhat|bottom)/.test(key);
     const limit=Math.min(12,Math.max(1,Number(question.match(/(?:top|đầu|cuối)\s*(\d+)/i)?.[1]||5)));
-    const calculations=businessAggregates(files,question).filter(item=>item.goalMatched).slice(0,3).map(item=>({...item,topGroups:[...item.topGroups].sort((a,b)=>ascending?a.value-b.value:b.value-a.value).slice(0,limit)}));
-    return {question,status:calculations.length?'calculated':'limited',calculations,explanation:calculations.length?'Tính trên các dòng có giá trị hợp lệ; mỗi góc nhìn dùng cùng nguồn dữ liệu.':'Chưa xác định được cặp cột và phép tính phù hợp. Chỉ số thiếu căn cứ sẽ không được tự tạo.'};
+    const computed=businessCalculation(files,question);
+    const calculations=(computed?.calculations || businessAggregates(files,question).filter(item=>item.goalMatched)).slice(0,3).map(item=>({...item,topGroups:[...item.topGroups].sort((a,b)=>ascending?a.value-b.value:b.value-a.value).slice(0,limit)}));
+    return {question,status:calculations.length?'calculated':'limited',calculations,explanation:computed?.explanation || (calculations.length?'Tính trên các dòng có giá trị hợp lệ; mỗi góc nhìn dùng cùng nguồn dữ liệu.':'Chưa xác định được cặp cột và phép tính phù hợp. Chỉ số thiếu căn cứ sẽ không được tự tạo.')};
   });
 }
 
+// Bounded arithmetic over supplied columns. No generated code or guessed values.
+function businessCalculation(files,question){
+  const normalize=value=>businessColumnKey(String(value).replace(/m²|m\^2/gi,'m2')).replace(/_/g,' ');
+  const q=normalize(question),groupText=q.split(/\btheo\b/)[1]?.trim()||'';
+  const aliases={profit:['loi nhuan','profit'],revenue:['doanh thu','revenue'],cost:['tong chi phi','total cost'],area:['dien tich','area'],quantity:['so luong','quantity'],store:['cua hang','store'],region:['khu vuc','vung','region'],channel:['kenh ban','kenh','channel']};
+  const term=(text,word)=>(' '+text+' ').includes(' '+word+' ');
+  const density=/\bm2\b/.test(q),margin=/(bien loi nhuan|ty suat loi nhuan|ty le loi nhuan|profit margin)/.test(q);
+  const percent=margin||/(phan tram|ty le|ti le|percentage|percent)/.test(q)||question.includes('%');
+  const binary=question.match(/\s([+\-*/÷×])\s/);
+  const count=/(dem|count)\b/.test(q),min=/(nho nhat|thap nhat|minimum|min)\b/.test(q),max=/(lon nhat|cao nhat|maximum|max)\b/.test(q),avg=/(trung binh|binh quan|average|avg)\b/.test(q);
+  const ratio=density||margin||percent||!!binary&&/[\/÷]/.test(binary[1]);
+  const difference=!ratio&&(binary?.[1]==='-'||/chenh lech|hieu so/.test(q));
+  const multiply=!ratio&&/[\*×]/.test(binary?.[1]||'');
+  const add=!ratio&&binary?.[1]==='+';
+  const explicit=ratio||difference||multiply||add||count||min||max||avg||/(tong|sum)\b/.test(q);
+  if(!explicit)return null;
+  const calculations=[],issues=[];
+  for(const file of files){
+    const find=phrase=>{
+      const text=normalize(phrase);
+      const direct=file.headers.filter(header=>term(text,normalize(header))).sort((a,b)=>normalize(b).length-normalize(a).length);
+      if(direct.length)return direct[0];
+      const concepts=Object.entries(aliases).filter(([,words])=>words.some(word=>term(text,word)));
+      const matches=file.headers.filter(header=>concepts.some(([,words])=>words.some(word=>normalize(header)===word||normalize(header).startsWith(word+' '))));
+      return matches.length===1?matches[0]:null;
+    };
+    let groupField=groupText?find(groupText):null;
+    if(groupText&&!groupField){issues.push('Chưa xác định được cột nhóm phù hợp với phần “theo”.');continue;}
+    const measureText=q.split(/\btheo\b/)[0];
+    let numerator,denominator,formula,metricField;
+    const profit=find('loi nhuan'),revenue=find('doanh thu');
+    const costColumns=file.headers.filter(header=>/^(tong chi phi|total cost)( |$)/.test(normalize(header)));
+    const cost=costColumns.length===1?costColumns[0]:null;
+    const profitValue=profit?row=>businessAmount(row[profit]):revenue&&cost?row=>{const a=businessAmount(row[revenue]),b=businessAmount(row[cost]);return a===null||b===null?null:a-b;}:null;
+    if(density||margin){
+      denominator=density?find('dien tich'):revenue;
+      const densityField=density&&!/loi nhuan|profit/.test(measureText)?find(measureText):null;
+      numerator=density&&!/loi nhuan|profit/.test(measureText)?densityField?row=>businessAmount(row[densityField]):null:profitValue;
+      metricField=density?`${densityField||'Lợi nhuận'} / m²`:'Biên lợi nhuận (%)';
+      formula=(densityField||profit||revenue&&cost?densityField||profit||`(${revenue} − ${cost})`:'Lợi nhuận')+' / '+(denominator||'cột còn thiếu')+(margin?' × 100':'');
+      if(!numerator||!denominator){issues.push('Cần cột lợi nhuận (hoặc doanh thu và tổng chi phí), cùng '+(density?'diện tích hợp lệ.':'doanh thu hợp lệ.'));continue;}
+    }else if(ratio||difference||multiply||add){
+      const parts=question.split(/\s[+\-*/÷×]\s|\s+chia\s+|\s+trên\s+|\s+so với\s+/i);
+      const a=parts.length>1?find(parts[0]):null,b=parts.length>1?find(parts[1].split(/\btheo\b/i)[0]):null;
+      if(!a||!b||a===b){issues.push('Hãy ghi rõ hai cột, ví dụ “Doanh thu / Diện tích theo Cửa hàng”.');continue;}
+      numerator=row=>businessAmount(row[a]);denominator=b;
+      formula=`${a} ${ratio?'/':difference?'−':multiply?'×':'+'} ${b}${percent?' × 100':''}`;metricField=formula;
+    }else{
+      const field=find(measureText);
+      if(!count&&!field){issues.push('Chưa xác định được cột số cần tính. Hãy dùng tên cột trong bảng.');continue;}
+      numerator=count?()=>1:row=>businessAmount(row[field]);metricField=count?'Số dòng':field;
+      formula=count?'Đếm số dòng hợp lệ':`${avg?'Trung bình':min?'Nhỏ nhất':max?'Lớn nhất':'Tổng'} ${field}`;
+    }
+    const buckets=new Map();let validRows=0,skippedRows=0;
+    for(const row of file.rows){
+      const name=groupField?String(row[groupField]??'').trim():'Toàn bộ dữ liệu';
+      const a=numerator(row),b=denominator?businessAmount(row[denominator]):null;
+      if(!name||a===null||denominator&&(b===null||ratio&&(b===0||density&&b<0))){skippedRows++;continue;}
+      const value=difference?a-b:multiply?a*b:add?a+b:a;
+      if(!Number.isFinite(value)){skippedRows++;continue;}
+      const bucket=buckets.get(name)||{sum:0,den:0,count:0,min:Infinity,max:-Infinity};
+      bucket.sum+=value;bucket.den+=b||0;bucket.count++;bucket.min=Math.min(bucket.min,value);bucket.max=Math.max(bucket.max,value);buckets.set(name,bucket);validRows++;
+    }
+    const evaluate=bucket=>ratio?(bucket.den===0?null:bucket.sum/bucket.den*(percent?100:1)):avg?bucket.sum/bucket.count:min?bucket.min:max?bucket.max:bucket.sum;
+    const overall={sum:0,den:0,count:0,min:Infinity,max:-Infinity};
+    for(const b of buckets.values()){overall.sum+=b.sum;overall.den+=b.den;overall.count+=b.count;overall.min=Math.min(overall.min,b.min);overall.max=Math.max(overall.max,b.max);}
+    const groups=[...buckets].map(([name,bucket])=>({name,value:evaluate(bucket),count:bucket.count})).filter(group=>group.value!==null&&Number.isFinite(group.value));
+    const totalValue=evaluate(overall);
+    if(!validRows||!groups.length||!Number.isFinite(totalValue)){issues.push('Không có đủ giá trị hợp lệ hoặc mẫu số tổng bằng 0.');continue;}
+    calculations.push({file:file.name,groupField:groupField||'Toàn bộ dữ liệu',metricField,aggregation:ratio?'ratio':avg?'average':min?'min':max?'max':count?'count':'sum',formula,method:ratio?'Tổng tử số / tổng mẫu số trên cùng các dòng hợp lệ; không cộng các tỷ lệ từng dòng.':'Tính theo từng nhóm trên các dòng hợp lệ.',totalRows:file.rows.length,validRows,skippedRows,totalValue,totalGroups:groups.length,topGroups:groups.sort((a,b)=>b.value-a.value).slice(0,12)});
+  }
+  return {calculations,explanation:calculations.length?'Kết quả tính trực tiếp theo công thức bên dưới. Dòng thiếu dữ liệu, sai định dạng hoặc mẫu số không hợp lệ được loại khỏi phép tính.':issues[0]||'Chưa đủ cột để thực hiện phép tính này.'};
+}
+
 function businessDataFallback(input,error){
+  if(input.requestedResults?.length){
+    const items=input.requestedResults.flatMap(request=>request.calculations.length?request.calculations.map(item=>`${request.question}: ${fmtNum(item.totalValue)}. ${item.formula||item.metricField}; ${fmtNum(item.validRows)} dòng hợp lệ.`):[`${request.question}: ${request.explanation}`]).slice(0,6);
+    return {summary:'Đã tính các yêu cầu có đủ dữ liệu. Công thức và kết quả chi tiết được trình bày trong mục “Yêu cầu báo cáo của bạn”.',items,limitations:['Nhận xét AI tạm thời chưa khả dụng; các phép tính vẫn được thực hiện trực tiếp trên dữ liệu.']};
+  }
   const aggregate=input.aggregates[0];
   const fileCount=input.files.length,rowCount=input.files.reduce((n,file)=>n+file.totalRows,0);
   const limitations=['Nhận xét AI tạm thời chưa khả dụng; các số liệu vẫn được tính trực tiếp từ tệp.'];
@@ -189,7 +268,7 @@ async function runBusinessAnalysisFromContext(){
   try{
     if(state.cleanEditBackup)throw new Error('Hãy lưu và kiểm tra lại các ô đã sửa trước khi phân tích.');
     state.analysisMode='generic';
-    await runClean();
+    if(!state.clean || state.clean.blocked)await runClean();
     if(!state.clean || state.clean.blocked)throw new Error('Dữ liệu chưa qua kiểm tra. Hãy xem lỗi tệp phía trên.');
     output=stageEl.querySelector('#businessAnalysisResult');
     const currentButton=stageEl.querySelector('#runBusinessAnalysis');

@@ -13,17 +13,26 @@ function repairMessage(message) {
 }
 
 async function openRepair(mode) {
+  if(state.processing || state.uploading)return;
+  if(mode==='manual' && state.clean && !state.clean.blocked && state.clean.cleanedFiles?.length){
+    const generic=state.analysisMode==='generic';
+    const files=state.clean.cleanedFiles.map(file=>({name:file.name,kind:generic?'generic':file.kind,headers:[...file.headers],rows:file.rows.map(row=>({...row})),mapping:generic?{}:Object.fromEntries(Object.keys(repairLabels).map(field=>[field,file.headers.includes(field)?field:'']))}));
+    state.repair={files,fields:generic?[]:Object.keys(repairLabels),report:{renamed:0,dates:0,exactDuplicates:0},mode:'manual',fileIndex:Math.max(0,state.cleanFileIndex),page:0,query:'',searchField:'',dropExact:false,edits:0,busy:false};
+    document.querySelector('#repairTitle').textContent='Sửa dữ liệu';
+    renderRepair();repairDialog.showModal();
+    return;
+  }
   if(state.clean?.blocked && state.clean.remediation?.action==='reload'){setStep(1);return;}
   const requestId = ++repairRequestId;
   repairContent.innerHTML = '<p class="repair-loading" role="status">Đang đọc dữ liệu để chuẩn bị bản sửa…</p>';
   document.querySelector('#repairTitle').textContent = mode === 'auto' ? 'Agent chuẩn hóa định dạng' : 'Tự sửa dữ liệu';
   repairDialog.showModal();
   try {
-    const res = await fetch('/api/repair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, datasets: state.datasets }) });
+    const res = await fetch('/api/repair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, datasets: state.datasets,analysisMode:state.analysisMode }) });
     const result = await res.json();
     if (requestId !== repairRequestId || !repairDialog.open) return;
     if (!res.ok) throw new Error(result.message || 'Không đọc được tệp.');
-    state.repair = { ...result, fileIndex: 0, page: 0, dropExact: false, edits: 0, busy: false };
+    state.repair = { ...result, fileIndex: 0, page: 0,query:'',searchField:'', dropExact: false, edits: 0, busy: false };
     if (repairDialog.open) renderRepair();
   } catch (error) {
     if (requestId !== repairRequestId || !repairDialog.open) return;
@@ -32,14 +41,21 @@ async function openRepair(mode) {
 }
 
 function repairFile() { return state.repair.files[state.repair.fileIndex]; }
+function repairFilteredRows(file){
+  const normalize=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase();
+  const query=normalize(state.repair.query).trim(),fields=state.repair.searchField?[state.repair.searchField]:file.headers;
+  return file.rows.map((row,index)=>({row,index})).filter(item=>!query||fields.some(field=>normalize(item.row[field]).includes(query)));
+}
 
 function repairTable(file) {
+  const filtered=repairFilteredRows(file);
+  state.repair.page=Math.max(0,Math.min(state.repair.page,Math.max(0,Math.ceil(filtered.length/20)-1)));
   const start = state.repair.page * 20;
-  return `<div class="table-wrap repair-table"><table class="data-table"><thead><tr><th scope="col">Dòng</th>${file.headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${file.rows.slice(start, start + 20).map((row, i) => `<tr><th scope="row">${start + i + 2}</th>${file.headers.map((h, col) => {
+  return `<div class="table-wrap repair-table"><table class="data-table"><thead><tr><th scope="col">Dòng gốc</th>${file.headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${filtered.slice(start, start + 20).map(({row,index}) => `<tr><th scope="row">${index + 2}</th>${file.headers.map((h, col) => {
     const missing = (file.mapping.customer_id === h || file.mapping.expiration_date === h) && !String(row[h] ?? '').trim();
-    return `<td><input class="repair-cell ${missing ? 'missing-cell' : ''}" data-cell-row="${start + i}" data-cell-col="${col}" value="${esc(row[h] ?? '')}" aria-label="Dòng ${start + i + 2}, ${esc(h)}" ${missing ? 'aria-invalid="true"' : ''}></td>`;
-  }).join('')}</tr>`).join('')}</tbody></table></div>
-  <div class="table-pagination"><span>${fmtNum(start + 1)}–${fmtNum(Math.min(start + 20, file.rows.length))} / ${fmtNum(file.rows.length)} dòng · 20 dòng/trang</span><div class="pagination-actions"><button class="btn btn-light" data-repair-page="${state.repair.page - 1}" ${start === 0 ? 'disabled' : ''} aria-label="Trang dữ liệu trước">←</button><button class="btn btn-light" data-repair-page="${state.repair.page + 1}" ${start + 20 >= file.rows.length ? 'disabled' : ''} aria-label="Trang dữ liệu sau">→</button></div></div>`;
+    return `<td><input class="repair-cell ${missing ? 'missing-cell' : ''}" data-cell-row="${index}" data-cell-col="${col}" value="${esc(row[h] ?? '')}" aria-label="Dòng ${index + 2}, ${esc(h)}" ${missing ? 'aria-invalid="true"' : ''}></td>`;
+  }).join('')}</tr>`).join('')||`<tr><td colspan="${file.headers.length+1}">Không tìm thấy dữ liệu phù hợp. Thử từ khóa khác hoặc xóa tìm kiếm.</td></tr>`}</tbody></table></div>
+  <div class="table-pagination"><span>${filtered.length?fmtNum(start+1):0}–${fmtNum(Math.min(start+20,filtered.length))} / ${fmtNum(filtered.length)} dòng phù hợp · Tổng ${fmtNum(file.rows.length)} dòng</span><div class="pagination-actions"><button class="btn btn-light" data-repair-page="${state.repair.page - 1}" ${start === 0 ? 'disabled' : ''} aria-label="Trang dữ liệu trước">←</button><button class="btn btn-light" data-repair-page="${state.repair.page + 1}" ${start + 20 >= filtered.length ? 'disabled' : ''} aria-label="Trang dữ liệu sau">→</button></div></div>`;
 }
 
 function renderRepair() {
@@ -48,14 +64,14 @@ function renderRepair() {
   repairContent.innerHTML = `<div id="repairMessage"></div>
     <div class="alert ${r.mode === 'auto' ? 'success' : 'warning'}">${r.mode === 'auto'
       ? `<b>Bản chuẩn hóa để xem trước:</b> ${fmtNum(r.report.renamed)} tên cột và ${fmtNum(r.report.dates)} ô ngày đã được chuẩn hóa. Các cột chưa nhận diện được vẫn được giữ lại.`
-      : '<b>Sửa trực tiếp trên bảng hoặc ghép cột cho toàn bộ tệp.</b> Chọn đúng cột nguồn bên dưới nếu tên cột trong tệp khác yêu cầu.'}
-      <div>Ngày dùng quy ước DD/MM/YYYY hoặc YYYY-MM-DD. Mã khách hàng và ngày còn thiếu cần bạn bổ sung; Agent không tự tạo giá trị.</div></div>
+      : '<b>Tìm và sửa dữ liệu trực tiếp trong bảng.</b> Thay đổi được giữ trong bản nháp đến khi bạn áp dụng.'}
+      <div>Chỉ nhập giá trị đã đối chiếu. Dữ liệu sẽ được kiểm tra lại sau khi áp dụng.</div></div>
     <div class="repair-toolbar"><label>Tệp đang sửa<select id="repairFileSelect">${r.files.map((f, i) => `<option value="${i}" ${i === r.fileIndex ? 'selected' : ''}>${esc(categories.find(c => c.id === f.kind)?.title || f.kind)} · ${esc(f.name)} (${fmtNum(f.rows.length)} dòng)</option>`).join('')}</select></label><span class="repair-draft-tag">Bản nháp · Chưa áp dụng</span></div>
-    <details class="repair-mapping" open><summary>Ghép cột nguồn với trường dữ liệu</summary><div class="mapping-grid">${fields.map(field => {
+    ${fields.length?`<details class="repair-mapping"><summary>Ghép cột nguồn với trường dữ liệu</summary><div class="mapping-grid">${fields.map(field => {
       const required = file.kind === 'contracts' && ['customer_id', 'expiration_date'].includes(field);
       return `<label>${esc(repairLabels[field] || field)} ${required ? '<span class="mapping-required">*</span>' : ''}<select data-mapping="${field}" class="${required && !file.mapping[field] ? 'missing-cell' : ''}"><option value="">Chưa có / không ghép</option>${file.headers.map(h => `<option value="${esc(h)}" ${file.mapping[field] === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}<option value="__add_column__">＋ Tạo cột trống để nhập</option></select><small>${field}</small></label>`;
-    }).join('')}</div></details>
-    <div class="repair-table-title"><b>Dữ liệu có thể chỉnh sửa</b><label>Đi tới dòng <input type="number" id="repairJump" min="2" max="${file.rows.length + 1}" value="${r.page * 20 + 2}" aria-label="Đi tới dòng dữ liệu"></label></div>
+    }).join('')}</div></details>`:''}
+    <div class="repair-search"><label>Tìm dữ liệu cần sửa<input type="search" id="repairSearch" placeholder="Nhập mã, tên hoặc giá trị cần tìm…" value="${esc(r.query||'')}" autocomplete="off"></label><label>Tìm trong cột<select id="repairSearchField"><option value="">Tất cả các cột</option>${file.headers.map(h=>`<option value="${esc(h)}" ${r.searchField===h?'selected':''}>${esc(h)}</option>`).join('')}</select></label><button type="button" id="clearRepairSearch" class="btn btn-light">Xóa tìm kiếm</button></div><div class="repair-table-title"><b>Dữ liệu có thể chỉnh sửa</b><label>Đi tới dòng <input type="number" id="repairJump" min="2" max="${file.rows.length + 1}" value="${r.page * 20 + 2}" aria-label="Đi tới dòng dữ liệu"></label></div>
     <div id="repairTableHost">${repairTable(file)}</div>
     <label class="dedup-option"><input type="checkbox" id="repairDedup" ${r.dropExact ? 'checked' : ''}> Loại bản ghi hợp đồng trùng hoàn toàn khi áp dụng. Bản ghi cùng mã nhưng khác nội dung vẫn được giữ để kiểm tra.</label>
     ${r.report.exactDuplicates ? `<p class="microcopy">Phát hiện ban đầu: ${fmtNum(r.report.exactDuplicates)} bản ghi hợp đồng trùng hoàn toàn. Chưa xóa bản ghi nào.</p>` : ''}
@@ -112,6 +128,11 @@ repairDialog.addEventListener('cancel', e => { if (state.repair?.busy) e.prevent
 repairDialog.addEventListener('close', () => { repairRequestId++; });
 stageEl.addEventListener('click', e => { const button = e.target.closest('[data-repair-mode]'); if (button) openRepair(button.dataset.repairMode); });
 repairContent.addEventListener('input', e => {
+  if(e.target.id==='repairSearch'){
+    state.repair.query=e.target.value;state.repair.page=0;
+    document.querySelector('#repairTableHost').innerHTML=repairTable(repairFile());
+    return;
+  }
   if (e.target.matches('[data-cell-row]')) {
     const file = repairFile(); file.rows[Number(e.target.dataset.cellRow)][file.headers[Number(e.target.dataset.cellCol)]] = e.target.value;
     state.repair.edits++;
@@ -120,7 +141,8 @@ repairContent.addEventListener('input', e => {
 });
 repairContent.addEventListener('change', e => {
   const r = state.repair;
-  if (e.target.id === 'repairFileSelect') { r.fileIndex = Number(e.target.value); r.page = 0; renderRepair(); }
+  if(e.target.id==='repairSearchField'){r.searchField=e.target.value;r.page=0;document.querySelector('#repairTableHost').innerHTML=repairTable(repairFile());}
+  else if (e.target.id === 'repairFileSelect') { r.fileIndex = Number(e.target.value); r.page = 0; r.query='';r.searchField='';renderRepair(); }
   else if (e.target.matches('[data-mapping]')) {
     const file = repairFile(), field = e.target.dataset.mapping;
     if (e.target.value === '__add_column__') {
@@ -130,11 +152,18 @@ repairContent.addEventListener('change', e => {
     r.edits++; renderRepair();
   } else if (e.target.id === 'repairDedup') r.dropExact = e.target.checked;
   else if (e.target.id === 'repairJump') {
+    r.query='';r.searchField='';
     const line = Math.max(2, Math.min(repairFile().rows.length + 1, Number(e.target.value) || 2));
     r.page = Math.floor((line - 2) / 20); renderRepair();
   }
 });
 repairContent.addEventListener('click', e => {
+  if(e.target.closest('#clearRepairSearch')){
+    state.repair.query='';state.repair.searchField='';state.repair.page=0;
+    document.querySelector('#repairSearch').value='';document.querySelector('#repairSearchField').value='';
+    document.querySelector('#repairTableHost').innerHTML=repairTable(repairFile());
+    document.querySelector('#repairSearch').focus();return;
+  }
   const page = e.target.closest('[data-repair-page]');
   if (page && !page.disabled) { state.repair.page = Number(page.dataset.repairPage); renderRepair(); }
   else if (e.target.closest('#cancelRepair')) repairDialog.close();

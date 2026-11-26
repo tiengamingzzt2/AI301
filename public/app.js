@@ -77,7 +77,7 @@ function dashboardSnapshot() {
     overviewReviewNote: clean && !clean.blocked ? 'Hồ sơ còn thiếu dữ liệu nghiệp vụ' : 'Chưa có kết quả kiểm tra',
     overviewValueLabel: 'Giá trị gia hạn có căn cứ', overviewValue: '—', overviewValueNote: 'Hiển thị sau bước phân tích',
     workspaceStatus: ({1:'Sẵn sàng nhận dữ liệu',2:'Đang chờ duyệt dữ liệu',3:'Đã hoàn tất phân tích',4:'Đang chờ duyệt cuối',audit:'Lịch sử thực thi',dashboard:'Biểu đồ từ dữ liệu trong phiên',report:'Báo cáo từ kết quả phân tích'})[state.step],
-    workspaceTitle: state.step === 'dashboard' ? 'Dashboard dữ liệu' : state.step === 'report' ? 'Báo cáo phân tích' : state.step === 'audit' ? 'Nhật ký Agent' : 'Quy trình gia hạn',
+    workspaceTitle: state.step === 'dashboard' ? 'Dashboard dữ liệu' : state.step === 'report' ? 'Báo cáo phân tích' : state.step === 'audit' ? 'Nhật ký Agent' : 'Quy trình làm việc',
     stepCount1: files ? (isStep1Done ? `✓ ${fmtNum(files)} tệp` : `${fmtNum(files)} tệp`) : '—',
     stepCount2: clean?.blocked ? 'Cần sửa' : clean ? (isStep2Done ? '✓ Đã duyệt' : `👤 Cần duyệt (${fmtNum(generic ? clean.cleaningSummary.totalRows : cleanRows.length)})`) : '—',
     stepCount3: state.businessAnalysis ? '✓ Đã phân tích' : analyzed.length ? (isStep3Done ? '✓ Đã chuyển' : `${fmtNum(analyzed.length-approvedCount)} chờ`) : '—',
@@ -222,12 +222,22 @@ function money(n) { return n == null ? 'Chưa đủ căn cứ' : new Intl.Number
 function stageTitle(kicker, title, desc, tag = '') { return `<div class="stage-title"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p>${desc}</p></div>${tag ? `<span class="stage-label">${tag}</span>` : ''}</div>`; }
 function needsBusinessContext() {
   const clean=state.clean;
-  return !!clean && queuedFiles().length>0;
+  return state.step===2 && !!clean && !clean.blocked && queuedFiles().length>0;
+}
+function blockedInputPreview(){
+  if(!state.clean?.blocked)return '';
+  const previews=state.clean.previewFiles||[];
+  return '<section class="blocked-preview"><h3>Dữ liệu chưa đạt kiểm tra</h3><p>Chỉnh các ô cần sửa rồi lưu và kiểm tra lại. Chỉ chuyển bước khi dữ liệu đạt yêu cầu.</p>'+previews.map(file=>{
+    const matrix=file.matrix||[],width=Math.max(0,...matrix.map(row=>row.length));
+    if(!width)return '<p>Bảng '+esc(file.index)+': Không có nội dung đọc được. Hãy chọn lại file gốc.</p>';
+    const field=(row,col,value)=>'<input data-blocked-cell data-file="'+(file.index-1)+'" data-row="'+row+'" data-column="'+col+'" aria-label="Bảng '+file.index+', dòng '+(row+1)+', cột '+(col+1)+'" value="'+esc(value??'')+'" placeholder="'+(row===0?'Chưa có tên cột':'Trống')+'" '+(row===0&&!String(value||'').trim()?'aria-invalid="true"':'')+'>';
+    return '<article><div class="blocked-grid-toolbar"><strong>Bảng '+file.index+' · Dữ liệu gốc</strong><span>Chưa dùng để phân tích</span></div><div class="table-wrap"><table class="data-table blocked-grid"><thead><tr>'+Array.from({length:width},(_,col)=>'<th>'+field(0,col,matrix[0]?.[col])+'</th>').join('')+'</tr></thead><tbody>'+matrix.slice(1).map((row,i)=>'<tr>'+Array.from({length:width},(_,col)=>'<td>'+field(i+1,col,row[col])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div><p class="microcopy">Hiển thị '+Math.max(0,matrix.length-1)+' dòng đầu · tối đa 20 dòng và 12 cột. Các dòng ngoài bản xem trước được giữ nguyên khi lưu.</p></article>';
+  }).join('')+'<div class="blocked-grid-actions"><span id="blockedEditStatus" role="status">Sửa dữ liệu nhỏ tại đây; nếu thiếu trên diện rộng, hãy bổ sung file gốc.</span><button id="saveBlockedEdits" class="btn btn-primary" disabled>Lưu & kiểm tra lại</button></div></section>';
 }
 function businessContextForm() {
   const context=state.businessContext;
   const hasFiles=queuedFiles().length>0;
-  return `<section class="business-context" aria-label="Bối cảnh kinh doanh"><h3>Phân tích theo yêu cầu của bạn</h3><p>Nhập từng yêu cầu ở một dòng hoặc ngăn bằng dấu chấm phẩy. Kết quả riêng sẽ xuất hiện trong mục Yêu cầu báo cáo của bạn, kèm phép tính và nguồn dữ liệu.</p><div class="business-context-grid"><label>Lĩnh vực kinh doanh<input data-business-field="industry" maxlength="120" placeholder="VD: Bán lẻ, SaaS, bất động sản…" value="${esc(context.industry)}"></label><label>Mô hình kinh doanh<select data-business-field="businessType"><option value="" ${!context.businessType?'selected':''}>Chọn nếu phù hợp</option><option value="B2B" ${context.businessType==='B2B'?'selected':''}>B2B</option><option value="B2C" ${context.businessType==='B2C'?'selected':''}>B2C</option><option value="Khác" ${context.businessType==='Khác'?'selected':''}>Khác</option></select></label></div><label>Mục tiêu / yêu cầu phân tích<textarea data-business-field="goal" maxlength="1000" rows="3" placeholder="Mỗi dòng một yêu cầu. VD: Top 5 doanh thu theo vùng; Chi phí trung bình theo kênh…">${esc(context.goal)}</textarea></label><div class="business-context-actions"><button type="button" class="btn btn-primary" id="runBusinessAnalysis" ${hasFiles?'':'disabled'}>✦ Chạy phân tích với dữ liệu đã cung cấp →</button><span>${hasFiles?'Dùng các tệp đang giữ trong phiên.':'Tải lên ít nhất một tệp CSV hoặc XLSX để bắt đầu.'}</span></div><div class="ai-panel-result business-context-result" id="businessAnalysisResult" role="status" aria-live="polite">${state.aiBusinessAnalysis?aiResultMarkup(state.aiBusinessAnalysis):''}</div></section>`;
+  return `<section class="business-context" aria-label="Bối cảnh kinh doanh"><h3>Phân tích theo yêu cầu của bạn</h3><p>Nhập từng yêu cầu ở một dòng hoặc ngăn bằng dấu chấm phẩy. Kết quả riêng sẽ xuất hiện trong mục Yêu cầu báo cáo của bạn, kèm phép tính và nguồn dữ liệu.</p><div class="business-context-grid"><label>Lĩnh vực kinh doanh<input data-business-field="industry" maxlength="120" placeholder="VD: Bán lẻ, SaaS, bất động sản…" value="${esc(context.industry)}"></label><label>Mô hình kinh doanh<select data-business-field="businessType"><option value="" ${!context.businessType?'selected':''}>Chọn nếu phù hợp</option><option value="B2B" ${context.businessType==='B2B'?'selected':''}>B2B</option><option value="B2C" ${context.businessType==='B2C'?'selected':''}>B2C</option><option value="Khác" ${context.businessType==='Khác'?'selected':''}>Khác</option></select></label></div><label>Mục tiêu / yêu cầu phân tích<textarea data-business-field="goal" maxlength="1000" rows="3" placeholder="Mỗi dòng một yêu cầu. VD: Top 5 doanh thu theo vùng; Chi phí trung bình theo kênh…">${esc(context.goal)}</textarea></label><div class="business-context-actions" ${state.step===2?'hidden':''}><button type="button" class="btn btn-primary" id="runBusinessAnalysis" ${hasFiles?'':'disabled'}>✦ Chạy phân tích với dữ liệu đã cung cấp →</button><span>${hasFiles?'Dùng các tệp đang giữ trong phiên.':'Tải lên ít nhất một tệp CSV hoặc XLSX để bắt đầu.'}</span></div><div class="ai-panel-result business-context-result" id="businessAnalysisResult" role="status" aria-live="polite">${state.aiBusinessAnalysis?aiResultMarkup(state.aiBusinessAnalysis):''}</div></section>`;
 }
 function errorBox(errors = [], errorCount = errors.length, remediation = state.clean?.remediation) {
   const e = errors[0];
@@ -240,9 +250,9 @@ function toolsSection(content) { return `<details class="stage-tools-details"><s
 function renderUpload() {
   const files = queuedFiles();
   stageEl.innerHTML = `${stageTitle('BƯỚC 01 · ĐẦU VÀO', 'Một nơi cho tất cả dữ liệu', 'Chọn một hoặc nhiều tệp. Agent tự nhận diện nội dung, chuẩn hóa và trả kết quả làm sạch để bạn kiểm duyệt.', 'CSV · XLSX')}
-    ${inputGuideTeaser()}
+    ${state.clean?.blocked?'':inputGuideTeaser()}
     <div id="upload-error" aria-live="polite"></div>
-    ${needsBusinessContext()?businessContextForm():''}
+    ${blockedInputPreview()}
     <div id="uploadZone" class="unified-upload"><div class="drop-icon"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 21V5m0 0-6 6m6-6 6 6M5 21v5a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2v-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Kéo thả tệp vào đây</h3><p>Hợp đồng, sử dụng, hỗ trợ hay dữ liệu khác —<br>bạn chỉ cần tải lên, Agent sẽ tự đọc và làm sạch.</p><button type="button" id="browseUpload" class="btn btn-primary">Chọn tệp từ máy <span>↗</span></button><input id="file-upload" type="file" accept=".csv,.xlsx" multiple hidden aria-label="Tải lên một hoặc nhiều tệp CSV hoặc XLSX"><span class="upload-format-note">CSV, XLSX · Chọn nhiều tệp cùng lúc · Tổng tối đa 20 MB</span><div id="uploadStatus" class="upload-agent-status" role="status"></div></div>
     ${files.length ? `<div class="upload-queue"><div class="queue-heading"><b>${files.length} tệp đang giữ trong phiên</b><button id="clearUploads" class="btn btn-quiet">Bỏ tất cả</button></div>${files.slice(0,12).map((file, i) => { const detected = state.detectedFiles.find(f => f.name === file.name); return `<div class="queued-file"><span class="file-type-icon">${/\.xlsx$/i.test(file.name) ? 'XLSX' : 'CSV'}</span><div><strong>${esc(file.name)}</strong><small>${detected ? esc(kindLabel(detected.kind)) : 'Agent sẽ tự nhận diện'}</small></div><button type="button" class="remove-upload" data-remove-upload="${i}" aria-label="Bỏ tệp ${esc(file.name)}" ${state.processing ? 'disabled' : ''}>✕</button></div>`; }).join('')}${files.length > 12 ? `<p class="microcopy">Và ${files.length - 12} tệp khác trong phiên.</p>` : ''}</div>` : ''}
     <div class="upload-process"><span><b>01</b> Nhận diện tệp</span><i>→</i><span><b>02</b> Chuẩn hóa dữ liệu</span><i>→</i><span><b>03</b> Trả bản làm sạch</span></div>
@@ -277,7 +287,7 @@ async function runClean(feedback = '') {
     const result = await agentRun('clean');
     state.detectedFiles = result.detectedFiles || [];
     state.excludedFields = []; state.cleanEditBackup = null;
-    state.clean = result; showInputNotification(result.notification || (result.blocked?{level:'error',title:'Cần kiểm tra lại dữ liệu',message:result.errors?.[0]?.message||'Không đọc được dữ liệu.'}:null)); (result.log || []).forEach(item => pushAudit(item.skill, `${item.action}: ${item.detail}`));
+    state.blockedPatches={}; state.clean = result; showInputNotification(result.notification || (result.blocked?{level:'error',title:'Cần kiểm tra lại dữ liệu',message:result.errors?.[0]?.message||'Không đọc được dữ liệu.'}:null)); (result.log || []).forEach(item => pushAudit(item.skill, `${item.action}: ${item.detail}`));
     pushAudit('data_aggregator', feedback ? `Đã chạy lại kiểm tra dữ liệu theo phản hồi: ${feedback}` : `Đã đọc và kiểm tra ${Object.values(state.datasets).flat().length} tệp`);
     if (result.blocked) { setStep(1); return; }
     state.cleanFileIndex = result.cleanedFiles?.length ? 0 : -1;
@@ -326,7 +336,7 @@ function renderClean() {
     ${files.length ? `<div class="clean-file-toolbar"><label>Kết quả đang xem<select id="cleanFileSelect">${c.rows.length ? `<option value="-1" ${state.cleanFileIndex < 0?'selected':''}>Hồ sơ hợp đồng đã ghép (${c.rows.length})</option>` : ''}${files.map((f,i)=>`<option value="${i}" ${state.cleanFileIndex===i?'selected':''}>${esc(f.name)} · ${esc(kindLabel(f.kind))}</option>`).join('')}</select></label><button class="btn btn-light" id="downloadCleaned">↓ Tải CSV đã làm sạch</button></div>` : ''}
     <div id="cleanTableHost">${state.cleanFileIndex>=0 && files.length ? sourceTable(state.cleanFileIndex) : dataTable(c.rows || [], 'clean')}</div>
     ${toolsSection(`<div class="feedback-wrap"><label for="cleanFeedback">Phản hồi về bản làm sạch</label><textarea id="cleanFeedback" class="feedback" placeholder="Mô tả dữ liệu cần kiểm tra lại…">${esc(state.drafts.clean ?? '')}</textarea><small>Chạy lại kiểm tra theo quy tắc; tệp gốc được giữ nguyên.</small></div><button id="rerunClean" data-tools-run class="btn btn-light">↻ Chạy lại chuẩn hóa</button>`)}
-    <div class="stage-footer"><button id="backUpload" class="btn btn-quiet">← Bổ sung / đổi tệp</button><div class="result-actions"><button class="btn btn-light" data-repair-mode="manual">✎ Sửa dữ liệu</button><button id="approveClean" class="btn btn-primary" ${!state.cleanEditBackup?'':'disabled title="Lưu và kiểm tra lại các ô đã sửa trước khi phân tích"'}>${canAnalyze?(c.partialAnalysis?'Chấp nhận giới hạn & phân tích':'Dữ liệu đạt'):'Dữ liệu đạt · Phân tích'}　→</button></div></div>`;
+    <div class="stage-footer"><button id="backUpload" class="btn btn-quiet">← Bổ sung / đổi tệp</button><div class="result-actions"><button class="btn btn-light" data-repair-mode="manual">✎ Sửa dữ liệu</button><button id="approveClean" class="btn btn-primary" ${!state.cleanEditBackup?'':'disabled title="Lưu và kiểm tra lại các ô đã sửa trước khi phân tích"'}>${canAnalyze?(c.partialAnalysis?'Chấp nhận giới hạn & phân tích':'Dữ liệu đạt'):'Duyệt dữ liệu & phân tích'}　→</button></div></div>`;
   document.querySelector('#backUpload').onclick = () => setStep(1);
   document.querySelector('#rerunClean').onclick = () => runClean(document.querySelector('#cleanFeedback').value.trim());
   document.querySelector('#approveClean').onclick = () => canAnalyze ? runAnalysis() : runBusinessAnalysisFromContext();
@@ -377,11 +387,10 @@ function renderBusinessAnalysis(){
   const context=input.businessContext || {};
   const model=genericReportModel();
   const aggregates=model.aggregates || [];
-  const numericPlots=genericNumericDistributions(model.files,context.goal).slice(0,aggregates.length?1:2);
-  const charts=aggregates.slice(0,4).map(item=>`<article class="report-chart"><h3>${item.aggregation==='average'?'Trung bình':'Tổng'} ${esc(item.metricField)} theo ${esc(item.groupField)}</h3>${genericReportBars(item.topGroups.slice(0,8).map(group=>({name:group.name,value:group.value})),item.topGroups[0]?.value||0,fmtNum)}</article>`).join('')+numericPlots.map(plot=>`<article class="report-chart"><h3>Phân bố ${esc(plot.name)}</h3>${genericReportBars(plot.bins,Math.max(...plot.bins.map(bin=>bin.value),0),value=>`${fmtNum(value)} dòng`)}</article>`).join('');
+  const charts=insightChartCards(model);
   stageEl.innerHTML=`${stageTitle('BƯỚC 03 · PHÂN TÍCH','Kết quả phân tích dữ liệu','Kết quả dựa trên các tệp đã làm sạch và mục tiêu bạn cung cấp. Các chỉ số thiếu căn cứ được nêu rõ.','Đã phân tích')}
     <div class="review-context"><strong>${fmtNum(input.files.reduce((sum,file)=>sum+file.totalRows,0))} dòng · ${fmtNum(input.files.length)} tệp</strong><span>${context.industry?`Lĩnh vực: ${esc(context.industry)} · `:''}${context.businessType?`${esc(context.businessType)} · `:''}${context.goal?`Mục tiêu: ${esc(context.goal)}`:'Chưa mô tả mục tiêu cụ thể'}</span></div>
-    ${charts?`<section class="business-ranking"><h3>Biểu đồ từ dữ liệu</h3><div class="report-charts">${charts}</div></section>`:''}
+    ${charts?`<section class="business-ranking insight-section"><div class="insight-section-heading"><div><h3>Góc nhìn từ dữ liệu</h3><p>Tỷ trọng, xu hướng và phân bố được chọn theo nội dung từng cột.</p></div><span>Biểu đồ từ dữ liệu</span></div><div class="report-charts">${charts}</div></section>`:''}
     <section class="ai-panel"><h3>Kết luận và đề xuất</h3><div class="ai-panel-result">${aiResultMarkup(result)}</div></section>
     ${aggregates.map(item=>`<details class="business-ranking"><summary><b>${item.aggregation==='average'?'Trung bình':'Tổng'} ${esc(item.metricField)} theo ${esc(item.groupField)}</b> · ${fmtNum(item.totalGroups)} nhóm</summary><div class="table-wrap"><table class="data-table"><thead><tr><th scope="col">Nhóm</th><th scope="col">${item.aggregation==='average'?'Trung bình':'Tổng'} ${esc(item.metricField)}</th><th scope="col">Số dòng</th></tr></thead><tbody>${item.topGroups.map(group=>`<tr><td>${esc(group.name)}</td><td>${fmtNum(group.value)}</td><td>${fmtNum(group.count)}</td></tr>`).join('')}</tbody></table></div></details>`).join('')}
     <div class="stage-footer"><button id="backClean" class="btn btn-quiet">← Quay lại duyệt dữ liệu</button><div class="result-actions"><button id="editBusinessGoal" class="btn btn-light">Điều chỉnh yêu cầu</button><button id="openGenericReport" class="btn btn-primary">▤ Xem báo cáo phân tích →</button></div></div>`;
@@ -460,16 +469,23 @@ render();
 // Field selection is separate from source data: hiding never deletes an input column.
 function cleanSelectionReady() {
   const c=state.clean;
-  return !!c && !c.blocked && c.canAnalyze !== false && !!c.rows?.length && !state.cleanEditBackup;
+  return !!c && !c.blocked && !!c.cleanedFiles?.some(file=>file.headers?.length) && !state.cleanEditBackup;
 }
-function cleanProtectedField(key) { return ['customer_id','contract_id','expiration_date'].includes(key); }
+function cleanProtectedField(key) { return state.analysisMode!=='generic' && ['customer_id','contract_id','expiration_date'].includes(key); }
+function selectedAnalysisFiles(){
+  const excluded=new Set(state.excludedFields||[]);
+  return (state.clean?.cleanedFiles||[]).map(file=>{
+    const headers=file.headers.filter(header=>!excluded.has(header));
+    return {...file,headers,rows:file.rows.map(row=>Object.fromEntries(headers.map(header=>[header,row[header]])))};
+  }).filter(file=>file.headers.length);
+}
 function cleanFieldControls() {
   const headers=[...new Set((state.clean?.cleanedFiles || []).flatMap(f=>f.headers))];
   const ready=cleanSelectionReady();
   return `<section class="clean-field-controls" aria-label="Sửa dữ liệu và chọn trường phân tích">
     <div class="clean-edit-actions"><span>Sửa trực tiếp trong ô, sau đó lưu để kiểm tra lại.</span><button class="btn btn-light" id="saveCleanEdits" ${state.cleanEditBackup?'':'disabled'}>Lưu & kiểm tra lại</button><button class="btn btn-quiet" id="cancelCleanEdits" ${state.cleanEditBackup?'':'disabled'}>Hủy sửa</button></div>
-    <p id="cleanEditStatus" role="status">${state.cleanEditBackup?'Có thay đổi chưa lưu. Hãy lưu và kiểm tra lại trước khi chọn trường hoặc phân tích.':ready?'Có thể ẩn trường không bắt buộc; trường thiếu vẫn được ghi rõ và không được tự điền.':state.clean?.canAnalyze===false?'Bảng dữ liệu có thể tiếp tục tới phân tích mô tả. Đề xuất gia hạn cần hợp đồng hợp lệ.':'Cần hợp đồng có mã khách và ngày hết hạn hợp lệ trước khi phân tích gia hạn.'}</p>
-    <details><summary>Trường dùng để phân tích · ${(state.excludedFields || []).length} trường đã ẩn</summary><fieldset ${ready?'':'disabled'}><legend>Chọn trường phân tích</legend>${headers.map(h=>`<label><input type="checkbox" data-clean-field="${esc(h)}" ${(state.excludedFields || []).includes(h)?'':'checked'} ${cleanProtectedField(h)?'disabled':''}> ${esc(inputSchema.fields.find(f=>f.key===h)?.label || h)}${cleanProtectedField(h)?' · bắt buộc':''}</label>`).join('')}</fieldset></details></section>`;
+    <p id="cleanEditStatus" role="status">${state.cleanEditBackup?'Có thay đổi chưa lưu. Hãy lưu và kiểm tra lại trước khi chọn trường hoặc phân tích.':ready?'Bỏ tích các cột không muốn dùng. Thay đổi có hiệu lực cho lần phân tích tiếp theo.':state.clean?.canAnalyze===false?'Bảng dữ liệu có thể tiếp tục tới phân tích mô tả. Đề xuất gia hạn cần hợp đồng hợp lệ.':'Cần hợp đồng có mã khách và ngày hết hạn hợp lệ trước khi phân tích gia hạn.'}</p>
+    <details data-analysis-fields><summary>Cột dùng để phân tích · ${headers.length-(state.excludedFields || []).length}/${headers.length} cột được chọn</summary><p>Bỏ tích cột không muốn phân tích. Cột bị bỏ sẽ không gửi tới AI hoặc xuất trong báo cáo; dữ liệu gốc vẫn được giữ.</p><fieldset ${ready?'':'disabled'}><legend>Chọn cột phân tích</legend>${headers.map(h=>`<label><input type="checkbox" data-clean-field="${esc(h)}" ${(state.excludedFields || []).includes(h)?'':'checked'} ${cleanProtectedField(h)?'disabled':''}> ${esc(inputSchema.fields.find(f=>f.key===h)?.label || h)}${cleanProtectedField(h)?' · bắt buộc':''}</label>`).join('')}</fieldset></details></section>`;
 }
 function invalidateCleanAnalysis() {
   state.analysis=null;state.businessAnalysis=null; state.aiCleanReview=null; state.aiInsights=null; resetReview();
@@ -517,9 +533,11 @@ stageEl.addEventListener('change',event=>{
   if(state.processing || !cleanSelectionReady() || cleanProtectedField(field)){renderClean();return;}
   const excluded=new Set(state.excludedFields || []);
   if(event.target.checked)excluded.delete(field);else excluded.add(field);
+  const headers=[...new Set((state.clean.cleanedFiles||[]).flatMap(file=>file.headers))];
+  if(headers.every(header=>excluded.has(header))){event.target.checked=true;document.querySelector('#cleanEditStatus').textContent='Cần giữ ít nhất một cột để phân tích.';return;}
   state.excludedFields=[...excluded]; invalidateCleanAnalysis(); saveStepDraft();
   pushAudit('analysis_fields',`${event.target.checked?'Hiện và dùng':'Ẩn và loại khỏi phân tích'} trường ${field}`);
-  renderClean(); updateDashboard();
+  renderClean();document.querySelector('[data-analysis-fields]').open=true;updateDashboard();
 });
 stageEl.addEventListener('click',event=>{
   if(event.target.closest('#saveCleanEdits'))saveCleanEdits();
@@ -528,6 +546,36 @@ stageEl.addEventListener('click',event=>{
   }
 });
 
+let inputNotificationTimer;
 function showInputNotification(notice){
- const host=document.querySelector('#inputNotification');if(!host)return;host.hidden=!notice;if(!notice)return;host.className='input-notification '+notice.level;host.innerHTML=`<div><strong>${esc(notice.title)}</strong><p>${esc(notice.message)}</p></div><button type="button" aria-label="Đóng thông báo">✕</button>`;host.querySelector('button').onclick=()=>{host.hidden=true;};
+ clearTimeout(inputNotificationTimer);
+ const host=document.querySelector('#inputNotification');if(!host)return;
+ host.hidden=!notice;if(!notice)return;
+ host.className='input-notification '+notice.level;
+ host.innerHTML=`<div><strong>${esc(notice.title)}</strong><p>${esc(notice.message)}</p></div><button type="button" aria-label="Đóng thông báo">✕</button>`;
+ const dismiss=()=>{clearTimeout(inputNotificationTimer);host.hidden=true;};
+ host.querySelector('button').onclick=dismiss;
+ inputNotificationTimer=setTimeout(dismiss,15000);
+}
+
+stageEl.addEventListener('input',event=>{
+  const input=event.target;if(!input.matches('[data-blocked-cell]'))return;
+  const patch={file:Number(input.dataset.file),row:Number(input.dataset.row),column:Number(input.dataset.column),value:input.value};
+  state.blockedPatches ||= {};state.blockedPatches[[patch.file,patch.row,patch.column].join(':')]=patch;
+  input.classList.add('cell-edited');stageEl.querySelector('#saveBlockedEdits').disabled=false;
+});
+stageEl.addEventListener('click',async event=>{
+  const button=event.target.closest('#saveBlockedEdits');if(!button||button.disabled||state.processing||state.uploading)return;
+  button.disabled=true;state.processing=true;const status=stageEl.querySelector('#blockedEditStatus');status.textContent='Đang lưu thay đổi…';
+  try{
+    const response=await fetch('/api/correct-input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:queuedFiles(),patches:Object.values(state.blockedPatches||{})})});
+    const result=await response.json();if(!response.ok)throw new Error(result.message||'Không lưu được thay đổi.');
+    state.datasets={auto:result.files};state.blockedPatches={};state.processing=false;await runClean();
+  }catch(error){status.textContent=error.message;button.disabled=false;}
+  finally{state.processing=false;}
+});
+
+function businessCalculationGuide(){
+ const examples=[['Tổng / trung bình','Tổng Doanh thu theo Khu vực'],['Nhỏ nhất / lớn nhất','Doanh thu lớn nhất theo Kênh bán'],['Đếm dòng','Đếm dòng theo Cửa hàng'],['Cộng / trừ','Doanh thu - Tổng chi phí theo Cửa hàng'],['Nhân hai cột','Giá * Số lượng theo Khu vực'],['Chia hai cột','Doanh thu / Diện tích theo Cửa hàng'],['Trên mỗi m²','Lợi nhuận trên m² theo Cửa hàng'],['Phần trăm','Lợi nhuận / Doanh thu (%) theo Khu vực'],['Biên lợi nhuận','Biên lợi nhuận theo Cửa hàng']];
+ return '<details class="calculation-guide"><summary>Các phép tính có thể yêu cầu · Xem ví dụ</summary><p>Dùng đúng tên cột trong dữ liệu của bạn. Mỗi dòng một yêu cầu; hệ thống xử lý tối đa 5 yêu cầu mỗi lượt. Dấu +, -, *, / cần cách hai bên.</p><div class="calculation-examples">'+examples.map(([label,example])=>'<article><b>'+esc(label)+'</b><code>'+esc(example)+'</code></article>').join('')+'</div><p>Tỷ lệ được tính bằng tổng tử số / tổng mẫu số trên cùng các dòng hợp lệ. Diện tích phải lớn hơn 0. Nếu diện tích lặp qua nhiều tháng, mẫu số là tổng diện tích của các kỳ được tính; cần đối chiếu phạm vi thời gian. Chưa tự ghép cột từ các file khác nhau.</p></details>';
 }

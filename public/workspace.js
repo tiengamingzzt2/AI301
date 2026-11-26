@@ -3,7 +3,7 @@ const toolsDialogContent=document.querySelector('#toolsDialogContent');
 let toolsSource=null, toolsOrigin=null, toolsStep=null;
 const mobileSidebar=typeof matchMedia==='function' ? matchMedia('(max-width:900px)') : null;
 let workspaceAnimation=null;
-let reportMenuOpen=false, lastChromeStep=null;
+
 function animateWorkspaceTransition(previous,next,target=stageEl) {
   workspaceAnimation?.cancel();workspaceAnimation=null;
   if(typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion:reduce)').matches)return;
@@ -17,29 +17,9 @@ function animateWorkspaceTransition(previous,next,target=stageEl) {
 function updateWorkspaceChrome() {
   const busy=state.processing || state.uploading;
   const reviewing=[3,4].includes(state.step) && !!state.analysis;
-  if(state.step!==lastChromeStep){
-    if(state.step==='report')reportMenuOpen=true;
-    else if(state.step!=='dashboard')reportMenuOpen=false;
-    lastChromeStep=state.step;
-  }
+
   const labels={1:'01 / Nạp dữ liệu',2:'02 / Duyệt dữ liệu',3:'03 / Phân tích',4:'04 / Duyệt kết quả',audit:'Nhật ký Agent',dashboard:'Dashboard / Biểu đồ',report:'Báo cáo phân tích'};
   document.querySelector('#currentStageLabel').textContent=labels[state.step];
-  document.querySelector('#sidebarCharts').disabled=busy || !state.analysis?.rows?.length;
-  document.querySelector('#sidebarCharts').classList.toggle('active',state.step==='dashboard');
-  if(state.step==='dashboard')document.querySelector('#sidebarCharts').setAttribute('aria-current','page');else document.querySelector('#sidebarCharts').removeAttribute('aria-current');
-  const report=document.querySelector('#sidebarReport');
-  report.disabled=busy || (!state.analysis?.rows?.length && !state.businessAnalysis);
-  report.classList.toggle('active',['report','dashboard'].includes(state.step));
-  if(state.step==='report')report.setAttribute('aria-current','page');else report.removeAttribute('aria-current');
-  const submenu=document.querySelector('#reportSubmenu');
-  const expanded=reportMenuOpen && ['report','dashboard'].includes(state.step) && !report.disabled;
-  report.setAttribute('aria-expanded',String(expanded));
-  submenu.classList.toggle('is-open',expanded);
-  submenu.setAttribute('aria-hidden',String(!expanded));
-  submenu.inert=!expanded;
-  const tools=document.querySelector('#sidebarTools');
-  tools.disabled=busy || !state.analysis?.rows?.length;
-  tools.title=tools.disabled?'Cần hoàn tất phân tích trước.':'Mở phản hồi và tham số của báo cáo phân tích.';
   const approved=(state.analysis?.rows || []).filter(row=>reviewState.approved.has(reviewKey(row))).length;
   const overview=document.querySelector('#overviewPanel'), overviewButton=document.querySelector('#sidebarOverview');
   overviewButton.innerHTML=`<span>◫</span> ${overview.open?'Ẩn':'Hiện'} thống kê`;
@@ -52,8 +32,10 @@ function updateWorkspaceChrome() {
   const primary=document.querySelector('#sidebarPrimary');
   let target='',text='',available=!busy;
   if(state.step===1){target='browseUpload';text='＋ Chọn tệp';}
-  else if(state.step===2){target='approveClean';text='Dữ liệu đạt → Phân tích';}
-  else if(state.step===3 && state.businessAnalysis){target='backClean';text='← Duyệt lại dữ liệu';}
+  else if(state.step===2){target='approveClean';text='Duyệt dữ liệu & phân tích →';available=available && !state.cleanEditBackup;}
+  else if(state.step===3 && state.businessAnalysis){target='openGenericReport';text='Xem báo cáo phân tích →';}
+  else if(state.step==='report' && state.businessAnalysis){target='reviewGenericReport';text='Chuyển duyệt báo cáo →';}
+  else if(state.step===4 && state.businessAnalysis){target=state.businessAnalysis.approvedAt?'downloadReportXlsx':'reviewGenericReport';text=state.businessAnalysis.approvedAt?'↓ Xuất báo cáo Excel':'✓ Duyệt báo cáo';}
   else if(reviewing){
     const selected=selectedReviewRows().length;
     if(state.step===3){target='reviewOutput';text=`Chuyển duyệt ${fmtNum(selected)} hồ sơ →`;available=available && selected>0 && reviewState.view==='pending';}
@@ -103,16 +85,15 @@ document.querySelector('#sidebarFilters').addEventListener('click',event=>{
   const button=event.target.closest('[data-side-review-filter]');
   if(button && !button.disabled){setReviewFilter(button.dataset.sideReviewFilter);setSidebarOpen(false);}
 });
-document.querySelector('#sidebarTools').onclick=openWorkspaceTools;
-document.querySelector('#sidebarCharts').onclick=()=>{if(state.processing || state.uploading)return;saveStepDraft();setStep('dashboard');setSidebarOpen(false);};
-document.querySelector('#sidebarReport').onclick=()=>{
-  if(state.processing || state.uploading || (!state.analysis?.rows?.length && !state.businessAnalysis))return;
-  if(state.step==='report')reportMenuOpen=!reportMenuOpen;
-  else {saveStepDraft();reportMenuOpen=true;setStep('report');}
-  updateWorkspaceChrome();
-};
 document.querySelector('#sidebarOverview').onclick=()=>{const panel=document.querySelector('#overviewPanel');panel.open=!panel.open;updateWorkspaceChrome();};
 document.querySelector('#overviewPanel').addEventListener('toggle',updateWorkspaceChrome);
+const expandWorkspace=document.querySelector('#expandWorkspace');
+function setExpandedWorkspace(expanded){
+  document.querySelector('#workspaceShell').classList.toggle('workspace-expanded',expanded);
+  expandWorkspace.setAttribute('aria-pressed',String(expanded));
+  expandWorkspace.textContent=expanded?'⛶ Về bố cục thường':'⛶ Mở rộng vùng làm việc';
+}
+expandWorkspace.onclick=()=>setExpandedWorkspace(!document.querySelector('#workspaceShell').classList.contains('workspace-expanded'));
 document.querySelector('#closeTools').onclick=()=>toolsDialog.close();
 toolsDialog.addEventListener('close',restoreWorkspaceTools);
 toolsDialog.addEventListener('click',event=>{if(event.target.closest('[data-tools-run]'))toolsDialog.close();});
